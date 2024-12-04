@@ -25,11 +25,12 @@ use crate::type_coercion::functions::{
     data_types_with_aggregate_udf, data_types_with_scalar_udf, data_types_with_window_udf,
 };
 use crate::{utils, LogicalPlan, Projection, Subquery, WindowFunctionDefinition};
+use ariadne::{Color, Label, Report};
 use arrow::compute::can_cast_types;
 use arrow::datatypes::{DataType, Field};
 use datafusion_common::{
-    not_impl_err, plan_datafusion_err, plan_err, Column, ExprSchema, Result,
-    TableReference,
+    not_impl_err, plan_datafusion_err, plan_err, Column, DataFusionError, Diagnostics,
+    ExprSchema, Result, TableReference,
 };
 use datafusion_functions_window_common::field::WindowUDFFieldArgs;
 use recursive::recursive;
@@ -403,9 +404,47 @@ impl ExprSchemable for Expr {
                 ref right,
                 ref op,
             }) => {
+                let left_span = if let Expr::Column(Column { span, .. }) = left.as_ref() {
+                    Some(span.clone())
+                } else {
+                    None
+                };
+                let right_span = if let Expr::Column(Column { span, .. }) = right.as_ref() {
+                    Some(span.clone())
+                } else {
+                    None
+                };
+                dbg!(left_span);
                 let left = left.data_type_and_nullable(schema)?;
                 let right = right.data_type_and_nullable(schema)?;
-                Ok((get_result_type(&left.0, op, &right.0)?, left.1 || right.1))
+                let result_type = get_result_type(&left.0, op, &right.0);
+                match result_type {
+                    Ok(result_type) => Ok((result_type, left.1 || right.1)),
+                    Err(e) => {
+                        let mut err = plan_err!("Error in binary expression: {}", e);
+                        if let Err(DataFusionError::Plan { desc, diagnostics }) = &mut err
+                        {
+                            let report = ariadne::Report::build(
+                                ariadne::ReportKind::Error,
+                                1..1,
+                            )
+                            .with_message("Can't coerce types in binary expression")
+                            .with_label(
+                                Label::new(left_span.unwrap().start.column as usize-1..left_span.unwrap().end.column as usize)
+                                    .with_message(format!("Is of type {:?}", left.0))
+                                    .with_color(Color::Blue),
+                            )
+                            .with_label(
+                                Label::new(right_span.unwrap().start.column as usize-1..right_span.unwrap().end.column as usize)
+                                    .with_message(format!("Is of type {:?}", right.0))
+                                    .with_color(Color::Blue),
+                            )
+                            .finish();
+                            *diagnostics = Some(Diagnostics(report));
+                        }
+                        err
+                    }
+                }
             }
             Expr::WindowFunction(window_function) => {
                 self.data_type_and_nullable_with_window_function(schema, window_function)

@@ -18,6 +18,7 @@
 //! Column
 
 use arrow_schema::{Field, FieldRef};
+use sqlparser::tokenizer::Span;
 
 use crate::error::_schema_err;
 use crate::utils::{parse_identifiers_normalized, quote_identifier};
@@ -34,6 +35,7 @@ pub struct Column {
     pub relation: Option<TableReference>,
     /// field/column name.
     pub name: String,
+    pub span: Span,
 }
 
 impl Column {
@@ -50,6 +52,7 @@ impl Column {
         Self {
             relation: relation.map(|r| r.into()),
             name: name.into(),
+            span: Span::empty(),
         }
     }
 
@@ -58,6 +61,7 @@ impl Column {
         Self {
             relation: None,
             name: name.into(),
+            span: Span::empty(),
         }
     }
 
@@ -68,6 +72,7 @@ impl Column {
         Self {
             relation: None,
             name: name.into(),
+            span: Span::empty(),
         }
     }
 
@@ -99,7 +104,7 @@ impl Column {
             // identifiers will be treated as an unqualified column name
             _ => return None,
         };
-        Some(Self { relation, name })
+        Some(Self { relation, name, span: Span::empty() })
     }
 
     /// Deserialize a fully qualified name string into a column
@@ -113,6 +118,7 @@ impl Column {
             Self {
                 relation: None,
                 name: flat_name,
+                span: Span::empty(),
             },
         )
     }
@@ -124,6 +130,7 @@ impl Column {
             Self {
                 relation: None,
                 name: flat_name,
+                span: Span::empty(),
             },
         )
     }

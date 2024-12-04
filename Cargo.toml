@@ -145,10 +145,11 @@ recursive = "0.1.1"
 regex = "1.8"
 rstest = "0.23.0"
 serde_json = "1"
-sqlparser = { version = "0.52.0", features = ["visitor"] }
+sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs.git", rev = "4ab3ab91473d152c652e6582b63abb13535703f9", features = ["visitor"] }
 tempfile = "3"
 tokio = { version = "1.36", features = ["macros", "rt", "sync"] }
 url = "2.2"
+ariadne = "0.5.0"
 
 [profile.release]
 codegen-units = 1
@@ -175,7 +176,3 @@ large_futures = "warn"
 [workspace.lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(tarpaulin)"] }
 unused_qualifications = "deny"
-
-## Temp patch for sqlparser
-[patch.crates-io]
-sqlparser = { git = "https://github.com/apache/datafusion-sqlparser-rs.git", rev = "4ab3ab91473d152c652e6582b63abb13535703f9" }

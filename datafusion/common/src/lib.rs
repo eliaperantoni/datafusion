@@ -23,6 +23,7 @@ mod dfschema;
 mod functional_dependencies;
 mod join_type;
 mod param_value;
+mod diagnostics;
 #[cfg(feature = "pyarrow")]
 mod pyarrow;
 mod schema_reference;
@@ -118,3 +119,5 @@ macro_rules! downcast_value {
         })?
     }};
 }
+
+pub use diagnostics::Diagnostics;

@@ -33,6 +33,7 @@ use datafusion_common::{Column, DFSchema, Result};
 
 mod order_by;
 pub use order_by::rewrite_sort_cols_by_aggs;
+use sqlparser::tokenizer::Span;
 
 /// Trait for rewriting [`Expr`]s into function calls.
 ///
@@ -160,6 +161,7 @@ pub fn unnormalize_col(expr: Expr) -> Expr {
                 let col = Column {
                     relation: None,
                     name: c.name,
+                    span: Span::empty(),
                 };
                 Transformed::yes(Expr::Column(col))
             } else {
@@ -181,7 +183,7 @@ pub fn create_col_from_scalar_expr(
             Some::<TableReference>(subqry_alias.into()),
             name,
         )),
-        Expr::Column(Column { relation: _, name }) => Ok(Column::new(
+        Expr::Column(Column { relation: _, name, .. }) => Ok(Column::new(
             Some::<TableReference>(subqry_alias.into()),
             name,
         )),

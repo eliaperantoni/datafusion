@@ -26,6 +26,7 @@ use std::io;
 use std::result;
 use std::sync::Arc;
 
+use crate::diagnostics::Diagnostics;
 use crate::utils::quote_identifier;
 use crate::{Column, DFSchema, TableReference};
 #[cfg(feature = "avro")]
@@ -95,7 +96,10 @@ pub enum DataFusionError {
     /// This error happens when the user provides a bad query or plan, for
     /// example the user attempts to call a function that doesn't exist, or if
     /// the types of a function call are not supported.
-    Plan(String),
+    Plan {
+        desc: String,
+        diagnostics: Option<Diagnostics>,
+    },
     /// Error for invalid or unsupported configuration options.
     Configuration(String),
     /// Error when there is a problem with the query related to schema.
@@ -308,7 +312,7 @@ impl Error for DataFusionError {
             DataFusionError::NotImplemented(_) => None,
             DataFusionError::Internal(_) => None,
             DataFusionError::Configuration(_) => None,
-            DataFusionError::Plan(_) => None,
+            DataFusionError::Plan { .. } => None,
             DataFusionError::SchemaError(e, _) => Some(e),
             DataFusionError::Execution(_) => None,
             DataFusionError::ExecutionJoin(e) => Some(e),
@@ -420,7 +424,7 @@ impl DataFusionError {
             DataFusionError::SQL(_, _) => "SQL error: ",
             DataFusionError::NotImplemented(_) => "This feature is not implemented: ",
             DataFusionError::Internal(_) => "Internal error: ",
-            DataFusionError::Plan(_) => "Error during planning: ",
+            DataFusionError::Plan { .. } => "Error during planning: ",
             DataFusionError::Configuration(_) => "Invalid or Unsupported Configuration: ",
             DataFusionError::SchemaError(_, _) => "Schema error: ",
             DataFusionError::Execution(_) => "Execution error: ",
@@ -453,7 +457,7 @@ impl DataFusionError {
                 "{desc}.\nThis was likely caused by a bug in DataFusion's \
             code and we would welcome that you file an bug report in our issue tracker"
             )),
-            DataFusionError::Plan(ref desc) => Cow::Owned(desc.to_string()),
+            DataFusionError::Plan { ref desc, .. } => Cow::Owned(desc.to_string()),
             DataFusionError::SchemaError(ref desc, ref backtrace) => {
                 let backtrace: &str =
                     &backtrace.as_ref().clone().unwrap_or("".to_owned());
@@ -542,7 +546,65 @@ macro_rules! make_error {
 }
 
 // Exposes a macro to create `DataFusionError::Plan` with optional backtrace
-make_error!(plan_err, plan_datafusion_err, Plan);
+#[macro_export]
+macro_rules! make_plan_datafusion_err {
+    ($NAME_ERR:ident, $NAME_DF_ERR: ident, $ERR:ident) => { make_plan_datafusion_err!(@inner ($), $NAME_ERR, $NAME_DF_ERR, $ERR); };
+    (@inner ($d:tt), $NAME_ERR:ident, $NAME_DF_ERR:ident, $ERR:ident) => {
+        ::paste::paste!{
+            /// Macro wraps `$ERR` to add backtrace feature
+            #[macro_export]
+            macro_rules! $NAME_DF_ERR {
+                ($d($d args:expr),*) => {
+                    $crate::DataFusionError::$ERR{
+                        desc: ::std::format!(
+                            "{}{}",
+                            ::std::format!($d($d args),*),
+                            $crate::DataFusionError::get_back_trace(),
+                        ).into(),
+                        diagnostics: None,
+                    }
+                }
+            }
+
+
+            // Note: Certain macros are used in this  crate, but not all.
+            // This macro generates a use or all of them in case they are needed
+            // so we allow unused code to avoid warnings when they are not used
+            #[doc(hidden)]
+            #[allow(unused)]
+            pub use $NAME_DF_ERR as [<_ $NAME_DF_ERR>];
+        }
+    };
+}
+
+// Exposes a macro to create `Err(DataFusionError::Plan)` with optional backtrace
+#[macro_export]
+macro_rules! make_plan_err {
+    ($NAME_ERR:ident, $NAME_DF_ERR: ident, $ERR:ident) => { make_plan_err!(@inner ($), $NAME_ERR, $NAME_DF_ERR, $ERR); };
+    (@inner ($d:tt), $NAME_ERR:ident, $NAME_DF_ERR:ident, $ERR:ident) => {
+        ::paste::paste!{
+            /// Macro wraps Err(`$ERR`) to add backtrace feature
+            #[macro_export]
+            macro_rules! $NAME_ERR {
+                ($d($d args:expr),*) => {
+                    Err($crate::[<_ $NAME_DF_ERR>]!($d($d args),*))
+                }
+            }
+
+
+            // Note: Certain macros are used in this  crate, but not all.
+            // This macro generates a use or all of them in case they are needed
+            // so we allow unused code to avoid warnings when they are not used
+            #[doc(hidden)]
+            #[allow(unused)]
+            pub use $NAME_ERR as [<_ $NAME_ERR>];
+        }
+    };
+}
+
+// Exposes a macro to create `DataFusionError::Plan` with optional backtrace
+make_plan_datafusion_err!(plan_err, plan_datafusion_err, Plan);
+make_plan_err!(plan_err, plan_datafusion_err, Plan);
 
 // Exposes a macro to create `DataFusionError::Internal` with optional backtrace
 make_error!(internal_err, internal_datafusion_err, Internal);
@@ -802,7 +864,7 @@ mod test {
     /// DataFusion code needs to return an ArrowError
     fn return_arrow_error() -> arrow::error::Result<()> {
         // Expect the '?' to work
-        Err(DataFusionError::Plan("foo".to_string()).into())
+        Err(DataFusionError::Plan{desc: "foo".to_string(), diagnostics: None}.into())
     }
 
     /// Model what happens when using arrow kernels in DataFusion

@@ -81,8 +81,9 @@ impl MinMaxStatistics {
                     .zip(Some(file.partition_values.as_slice()))
             })
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| {
-                DataFusionError::Plan("Parquet file missing statistics".to_string())
+            .ok_or_else(|| DataFusionError::Plan {
+                desc: "Parquet file missing statistics".to_string(),
+                diagnostics: None,
             })?;
 
         // Helper function to get min/max statistics for a given column of projected_schema
@@ -96,8 +97,9 @@ impl MinMaxStatistics {
                             .get_value()
                             .cloned()
                             .zip(s.column_statistics[i].max_value.get_value().cloned())
-                            .ok_or_else(|| {
-                                DataFusionError::Plan("statistics not found".to_string())
+                            .ok_or_else(|| DataFusionError::Plan {
+                                desc: "statistics not found".to_string(),
+                                diagnostics: None,
                             })
                     } else {
                         let partition_value = &pv[i - s.column_statistics.len()];
@@ -110,9 +112,10 @@ impl MinMaxStatistics {
         };
 
         let sort_columns = sort_columns_from_physical_sort_exprs(projected_sort_order)
-            .ok_or(DataFusionError::Plan(
-                "sort expression must be on column".to_string(),
-            ))?;
+            .ok_or(DataFusionError::Plan {
+                desc: "sort expression must be on column".to_string(),
+                diagnostics: None,
+            })?;
 
         // Project the schema & sort order down to just the relevant columns
         let min_max_schema = Arc::new(
@@ -188,7 +191,10 @@ impl MinMaxStatistics {
         let converter = RowConverter::new(sort_fields)?;
 
         let sort_columns = sort_columns_from_physical_sort_exprs(sort_order).ok_or(
-            DataFusionError::Plan("sort expression must be on column".to_string()),
+            DataFusionError::Plan {
+                desc: "sort expression must be on column".to_string(),
+                diagnostics: None,
+            },
         )?;
 
         // swap min/max if they're reversed in the ordering
@@ -205,11 +211,12 @@ impl MinMaxStatistics {
                         .column_by_name(column.name())
                         .zip(max_values.column_by_name(column.name()))
                 }
-                .ok_or_else(|| {
-                    DataFusionError::Plan(format!(
+                .ok_or_else(|| DataFusionError::Plan {
+                    desc: format!(
                         "missing column in MinMaxStatistics::new: '{}'",
                         column.name()
-                    ))
+                    ),
+                    diagnostics: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?

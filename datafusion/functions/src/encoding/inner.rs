@@ -108,7 +108,7 @@ impl ScalarUDFImpl for EncodeFunc {
         }
 
         if arg_types[1] != DataType::Utf8 {
-            return Err(DataFusionError::Plan("2nd argument should be Utf8".into()));
+            return Err(DataFusionError::Plan{desc:"2nd argument should be Utf8".into(), diagnostics: None});
         }
 
         match arg_types[0] {
