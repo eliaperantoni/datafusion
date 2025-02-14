@@ -15,16 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use std::collections::HashMap;
+use std::{any::Any, collections::HashMap, sync::Arc};
 
+use arrow::datatypes::DataType;
 use datafusion_common::{Diagnostic, Location, Result, Span};
+use datafusion_expr::{ScalarUDF, ScalarUDFImpl, Signature, Volatility};
 use datafusion_sql::planner::{ParserOptions, SqlToRel};
 use regex::Regex;
 use sqlparser::{dialect::GenericDialect, parser::Parser};
 
 use crate::{MockContextProvider, MockSessionState};
 
-fn do_query(sql: &'static str) -> Diagnostic {
+fn do_query(sql: &'static str, state: MockSessionState) -> Diagnostic {
     let dialect = GenericDialect {};
     let statement = Parser::new(&dialect)
         .try_with_sql(sql)
@@ -36,7 +38,6 @@ fn do_query(sql: &'static str) -> Diagnostic {
         ..ParserOptions::default()
     };
 
-    let state = MockSessionState::default();
     let context = MockContextProvider { state };
     let sql_to_rel = SqlToRel::new_with_options(&context, options);
     match sql_to_rel.sql_statement_to_plan(statement) {
@@ -134,7 +135,7 @@ fn get_spans(query: &'static str) -> HashMap<String, Span> {
 fn test_table_not_found() -> Result<()> {
     let query = "SELECT * FROM /*a*/personx/*a*/";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(diag.message, "table 'personx' not found");
     assert_eq!(diag.span, Some(spans["a"]));
     Ok(())
@@ -144,7 +145,7 @@ fn test_table_not_found() -> Result<()> {
 fn test_unqualified_column_not_found() -> Result<()> {
     let query = "SELECT /*a*/first_namex/*a*/ FROM person";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(diag.message, "column 'first_namex' not found");
     assert_eq!(diag.span, Some(spans["a"]));
     Ok(())
@@ -154,7 +155,7 @@ fn test_unqualified_column_not_found() -> Result<()> {
 fn test_qualified_column_not_found() -> Result<()> {
     let query = "SELECT /*a*/person.first_namex/*a*/ FROM person";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(diag.message, "column 'first_namex' not found in 'person'");
     assert_eq!(diag.span, Some(spans["a"]));
     Ok(())
@@ -164,7 +165,7 @@ fn test_qualified_column_not_found() -> Result<()> {
 fn test_union_wrong_number_of_columns() -> Result<()> {
     let query = "/*whole+left*/SELECT first_name FROM person/*left*/ UNION ALL /*right*/SELECT first_name, last_name FROM person/*right+whole*/";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(
         diag.message,
         "UNION queries have different number of columns"
@@ -181,7 +182,7 @@ fn test_union_wrong_number_of_columns() -> Result<()> {
 fn test_missing_non_aggregate_in_group_by() -> Result<()> {
     let query = "SELECT id, /*a*/first_name/*a*/ FROM person GROUP BY id";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(
         diag.message,
         "'person.first_name' must appear in GROUP BY clause because it's not an aggregate expression"
@@ -198,7 +199,7 @@ fn test_missing_non_aggregate_in_group_by() -> Result<()> {
 fn test_ambiguous_reference() -> Result<()> {
     let query = "SELECT /*a*/first_name/*a*/ FROM person a, person b";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(diag.message, "column 'first_name' is ambiguous");
     assert_eq!(diag.span, Some(spans["a"]));
     assert_eq!(diag.notes[0].message, "possible column a.first_name");
@@ -211,7 +212,7 @@ fn test_incompatible_types_binary_arithmetic() -> Result<()> {
     let query =
         "SELECT /*whole+left*/id/*left*/ + /*right*/first_name/*right+whole*/ FROM person";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(diag.message, "expressions have incompatible types");
     assert_eq!(diag.span, Some(spans["whole"]));
     assert_eq!(diag.notes[0].message, "has type UInt32");
@@ -225,7 +226,7 @@ fn test_incompatible_types_binary_arithmetic() -> Result<()> {
 fn test_field_not_found_suggestion() -> Result<()> {
     let query = "SELECT /*whole*/first_na/*whole*/ FROM person";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
     assert_eq!(diag.message, "column 'first_na' not found");
     assert_eq!(diag.span, Some(spans["whole"]));
     assert_eq!(diag.notes.len(), 1);
@@ -250,7 +251,7 @@ fn test_field_not_found_suggestion() -> Result<()> {
 fn test_ambiguous_column_suggestion() -> Result<()> {
     let query = "SELECT /*whole*/id/*whole*/ FROM test_decimal, person";
     let spans = get_spans(query);
-    let diag = do_query(query);
+    let diag = do_query(query, MockSessionState::default());
 
     assert_eq!(diag.message, "column 'id' is ambiguous");
     assert_eq!(diag.span, Some(spans["whole"]));
@@ -272,5 +273,48 @@ fn test_ambiguous_column_suggestion() -> Result<()> {
     suggested_fields.sort();
     assert_eq!(suggested_fields, vec!["person.id", "test_decimal.id"]);
 
+    Ok(())
+}
+
+#[derive(Debug)]
+struct AbsUDF {
+    signature: Signature,
+}
+impl AbsUDF {
+    fn new() -> Self {
+        Self {
+            signature: Signature::exact(vec![DataType::Float64], Volatility::Immutable),
+        }
+    }
+}
+impl ScalarUDFImpl for AbsUDF {
+    fn as_any(&self) -> &dyn Any {
+        self as &dyn Any
+    }
+
+    fn name(&self) -> &str {
+        "abs"
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
+        Ok(DataType::Float64)
+    }
+}
+
+#[test]
+fn test_function_not_found() -> Result<()> {
+    let query = "SELECT /*fncall*/abz/*fncall*/('test')";
+    let spans = get_spans(query);
+    let udf = ScalarUDF::new_from_impl(AbsUDF::new());
+    let state = MockSessionState::default().with_scalar_function(Arc::new(udf));
+    let diag = do_query(query, state);
+    assert_eq!(diag.message, "function 'abz' does not exist");
+    assert_eq!(diag.span, Some(spans["fncall"]));
+    assert_eq!(diag.helps[0].message, "did you mean 'abs'?");
+    assert_eq!(diag.helps[0].span, None);
     Ok(())
 }

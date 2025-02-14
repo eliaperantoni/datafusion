@@ -20,7 +20,7 @@ use crate::planner::{ContextProvider, PlannerContext, SqlToRel};
 use arrow::datatypes::DataType;
 use datafusion_common::{
     internal_datafusion_err, internal_err, not_impl_err, plan_datafusion_err, plan_err,
-    DFSchema, Dependency, Result,
+    DFSchema, Dependency, Diagnostic, Result, Span,
 };
 use datafusion_expr::expr::{ScalarFunction, Unnest};
 use datafusion_expr::planner::PlannerResult;
@@ -29,9 +29,7 @@ use datafusion_expr::{
     WindowFrame, WindowFunctionDefinition,
 };
 use sqlparser::ast::{
-    DuplicateTreatment, Expr as SQLExpr, Function as SQLFunction, FunctionArg,
-    FunctionArgExpr, FunctionArgumentClause, FunctionArgumentList, FunctionArguments,
-    NullTreatment, ObjectName, OrderByExpr, WindowType,
+    DuplicateTreatment, Expr as SQLExpr, Function as SQLFunction, FunctionArg, FunctionArgExpr, FunctionArgumentClause, FunctionArgumentList, FunctionArguments, NullTreatment, ObjectName, OrderByExpr, Spanned, WindowType
 };
 
 /// Suggest a valid function based on an invalid input function name
@@ -202,6 +200,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         schema: &DFSchema,
         planner_context: &mut PlannerContext,
     ) -> Result<Expr> {
+        let function_span = Span::try_from_sqlparser_span(function.span());
         let function_args = FunctionArgs::try_new(function)?;
         let FunctionArgs {
             name,
@@ -357,6 +356,14 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             suggest_valid_function(&name, is_function_window, self.context_provider)
         {
             plan_err!("Invalid function '{name}'.\nDid you mean '{suggested_func_name}'?")
+                .map_err(|err| {
+                    let diag = Diagnostic::new_error(
+                        format!("function '{}' does not exist", &name),
+                        function_span,
+                    )
+                    .with_help(format!("did you mean '{}'?", &suggested_func_name), None);
+                    err.with_diagnostic(diag)
+                })
         } else {
             internal_err!("No functions registered with this context.")
         }
