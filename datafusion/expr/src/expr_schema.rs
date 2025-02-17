@@ -29,7 +29,7 @@ use arrow::compute::can_cast_types;
 use arrow::datatypes::{DataType, Field};
 use datafusion_common::{
     not_impl_err, plan_datafusion_err, plan_err, Column, DataFusionError, ExprSchema,
-    Result, TableReference,
+    Result, Span, TableReference,
 };
 use datafusion_expr_common::type_coercion::binary::BinaryTypeCoercer;
 use datafusion_functions_window_common::field::WindowUDFFieldArgs;
@@ -402,7 +402,16 @@ impl ExprSchemable for Expr {
             Expr::WindowFunction(window_function) => {
                 self.data_type_and_nullable_with_window_function(schema, window_function)
             }
-            Expr::ScalarFunction(ScalarFunction { func, args }) => {
+            Expr::ScalarFunction(ScalarFunction { func, args, spans }) => {
+                let span = Span::union_iter(
+                    [spans.first()]
+                        .into_iter()
+                        .chain(
+                            args.iter()
+                                .map(|arg| arg.spans().and_then(|spans| spans.first())),
+                        )
+                        .flatten(),
+                );
                 let (arg_types, nullables): (Vec<DataType>, Vec<bool>) = args
                     .iter()
                     .map(|e| e.data_type_and_nullable(schema))
@@ -439,8 +448,18 @@ impl ExprSchemable for Expr {
                     nullables: &nullables,
                 };
 
-                let (return_type, nullable) =
-                    func.return_type_from_args(args)?.into_parts();
+                let (return_type, nullable) = func
+                    .return_type_from_args(args)
+                    .map_err(|err| {
+                        if let Some(diag) = dbg!(err.diagnostic()) {
+                            let mut diag = diag.clone();
+                            diag.span = span;
+                            dbg!(err.with_diagnostic(diag))
+                        } else {
+                            err
+                        }
+                    })?
+                    .into_parts();
                 Ok((return_type, nullable))
             }
             _ => Ok((self.get_type(schema)?, self.nullable(schema)?)),

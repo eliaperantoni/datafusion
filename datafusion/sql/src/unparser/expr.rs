@@ -111,7 +111,11 @@ impl Unparser<'_> {
                     negated: *negated,
                 })
             }
-            Expr::ScalarFunction(ScalarFunction { func, args }) => {
+            Expr::ScalarFunction(ScalarFunction {
+                func,
+                args,
+                spans: _spans,
+            }) => {
                 let func_name = func.name();
 
                 if let Some(expr) = self
@@ -2745,18 +2749,18 @@ mod tests {
             [(default_dialect, "DOUBLE"), (postgres_dialect, "NUMERIC")]
         {
             let unparser = Unparser::new(dialect.as_ref());
-            let expr = Expr::ScalarFunction(ScalarFunction {
-                func: Arc::new(ScalarUDF::from(
+            let expr = Expr::ScalarFunction(ScalarFunction::new_udf(
+                Arc::new(ScalarUDF::from(
                     datafusion_functions::math::round::RoundFunc::new(),
                 )),
-                args: vec![
+                vec![
                     Expr::Cast(Cast {
                         expr: Box::new(col("a")),
                         data_type: DataType::Float64,
                     }),
                     Expr::Literal(ScalarValue::Int64(Some(2))),
                 ],
-            });
+            ));
             let ast = unparser.expr_to_sql(&expr)?;
 
             let actual = format!("{}", ast);

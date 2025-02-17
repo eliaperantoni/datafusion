@@ -18,8 +18,9 @@
 use std::{any::Any, collections::HashMap, sync::Arc};
 
 use arrow::datatypes::DataType;
-use datafusion_common::{Diagnostic, Location, Result, Span};
+use datafusion_common::{DataFusionError, Diagnostic, Location, Result, Span};
 use datafusion_expr::{ScalarUDF, ScalarUDFImpl, Signature, Volatility};
+use datafusion_functions::math::abs;
 use datafusion_sql::planner::{ParserOptions, SqlToRel};
 use regex::Regex;
 use sqlparser::{dialect::GenericDialect, parser::Parser};
@@ -276,45 +277,65 @@ fn test_ambiguous_column_suggestion() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug)]
-struct AbsUDF {
-    signature: Signature,
-}
-impl AbsUDF {
-    fn new() -> Self {
-        Self {
-            signature: Signature::exact(vec![DataType::Float64], Volatility::Immutable),
-        }
-    }
-}
-impl ScalarUDFImpl for AbsUDF {
-    fn as_any(&self) -> &dyn Any {
-        self as &dyn Any
-    }
-
-    fn name(&self) -> &str {
-        "abs"
-    }
-
-    fn signature(&self) -> &Signature {
-        &self.signature
-    }
-
-    fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
-        Ok(DataType::Float64)
-    }
-}
-
 #[test]
 fn test_function_not_found() -> Result<()> {
     let query = "SELECT /*fncall*/abz/*fncall*/('test')";
     let spans = get_spans(query);
-    let udf = ScalarUDF::new_from_impl(AbsUDF::new());
-    let state = MockSessionState::default().with_scalar_function(Arc::new(udf));
+    let state = MockSessionState::default().with_scalar_function(abs());
     let diag = do_query(query, state);
     assert_eq!(diag.message, "function 'abz' does not exist");
     assert_eq!(diag.span, Some(spans["fncall"]));
     assert_eq!(diag.helps[0].message, "did you mean 'abs'?");
     assert_eq!(diag.helps[0].span, None);
+    Ok(())
+}
+
+#[test]
+fn test_custom_fn_return_type() -> Result<()> {
+    #[derive(Debug)]
+    struct CustomUDF {
+        signature: Signature,
+    }
+    impl CustomUDF {
+        fn new() -> Self {
+            Self {
+                signature: Signature::user_defined(Volatility::Immutable),
+            }
+        }
+    }
+    impl ScalarUDFImpl for CustomUDF {
+        fn as_any(&self) -> &dyn Any {
+            self as &dyn Any
+        }
+
+        fn name(&self) -> &str {
+            "custom"
+        }
+
+        fn signature(&self) -> &Signature {
+            &self.signature
+        }
+
+        fn return_type(&self, _arg_types: &[DataType]) -> Result<DataType> {
+            let err = Box::<dyn std::error::Error + Send + Sync + 'static>::from(
+                "custom error",
+            );
+            let err = DataFusionError::External(err);
+            let err = err.with_diagnostic(Diagnostic::new_error("custom error", None));
+            Err(err)
+        }
+
+        fn coerce_types(&self, arg_types: &[DataType]) -> Result<Vec<DataType>> {
+            Ok(arg_types.to_vec())
+        }
+    }
+
+    let query = "SELECT /*fncall*/custom(first_name/*fncall*/) FROM person";
+    let spans = get_spans(query);
+    let udf = ScalarUDF::new_from_impl(CustomUDF::new());
+    let state = MockSessionState::default().with_scalar_function(Arc::new(udf));
+    let diag = do_query(query, state);
+    assert_eq!(diag.message, "custom error");
+    assert_eq!(diag.span, Some(spans["fncall"]));
     Ok(())
 }

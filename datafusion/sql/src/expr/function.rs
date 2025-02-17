@@ -20,7 +20,7 @@ use crate::planner::{ContextProvider, PlannerContext, SqlToRel};
 use arrow::datatypes::DataType;
 use datafusion_common::{
     internal_datafusion_err, internal_err, not_impl_err, plan_datafusion_err, plan_err,
-    DFSchema, Dependency, Diagnostic, Result, Span,
+    DFSchema, Dependency, Diagnostic, Result, Span, Spans,
 };
 use datafusion_expr::expr::{ScalarFunction, Unnest};
 use datafusion_expr::planner::PlannerResult;
@@ -29,7 +29,9 @@ use datafusion_expr::{
     WindowFrame, WindowFunctionDefinition,
 };
 use sqlparser::ast::{
-    DuplicateTreatment, Expr as SQLExpr, Function as SQLFunction, FunctionArg, FunctionArgExpr, FunctionArgumentClause, FunctionArgumentList, FunctionArguments, NullTreatment, ObjectName, OrderByExpr, Spanned, WindowType
+    DuplicateTreatment, Expr as SQLExpr, Function as SQLFunction, FunctionArg,
+    FunctionArgExpr, FunctionArgumentClause, FunctionArgumentList, FunctionArguments,
+    NullTreatment, ObjectName, OrderByExpr, Spanned, WindowType,
 };
 
 /// Suggest a valid function based on an invalid input function name
@@ -200,6 +202,11 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         schema: &DFSchema,
         planner_context: &mut PlannerContext,
     ) -> Result<Expr> {
+        let mut spans = Spans::new();
+        if let Some(span) = Span::try_from_sqlparser_span(function.span()) {
+            spans.add_span(span);
+        }
+
         let function_span = Span::try_from_sqlparser_span(function.span());
         let function_args = FunctionArgs::try_new(function)?;
         let FunctionArgs {
@@ -239,7 +246,9 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
         // User-defined function (UDF) should have precedence
         if let Some(fm) = self.context_provider.get_function_meta(&name) {
             let args = self.function_args_to_expr(args, schema, planner_context)?;
-            return Ok(Expr::ScalarFunction(ScalarFunction::new_udf(fm, args)));
+            return Ok(Expr::ScalarFunction(
+                ScalarFunction::new_udf(fm, args).with_spans(spans),
+            ));
         }
 
         // Build Unnest expression

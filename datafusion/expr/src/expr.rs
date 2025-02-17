@@ -549,6 +549,8 @@ pub struct ScalarFunction {
     pub func: Arc<crate::ScalarUDF>,
     /// List of expressions to feed to the functions as arguments
     pub args: Vec<Expr>,
+    /// Original source code location, if known
+    pub spans: Spans,
 }
 
 impl ScalarFunction {
@@ -561,7 +563,30 @@ impl ScalarFunction {
 impl ScalarFunction {
     /// Create a new ScalarFunction expression with a user-defined function (UDF)
     pub fn new_udf(udf: Arc<crate::ScalarUDF>, args: Vec<Expr>) -> Self {
-        Self { func: udf, args }
+        Self {
+            func: udf,
+            args,
+            spans: Spans::new(),
+        }
+    }
+
+    /// Returns a reference to the set of locations in the SQL query where this
+    /// column appears, if known.
+    pub fn spans(&self) -> &Spans {
+        &self.spans
+    }
+
+    /// Returns a mutable reference to the set of locations in the SQL query
+    /// where this column appears, if known.
+    pub fn spans_mut(&mut self) -> &mut Spans {
+        &mut self.spans
+    }
+
+    /// Replaces the set of locations in the SQL query where this column
+    /// appears, if known.
+    pub fn with_spans(mut self, spans: Spans) -> Self {
+        self.spans = spans;
+        self
     }
 }
 
@@ -1848,10 +1873,12 @@ impl NormalizeEq for Expr {
                 Expr::ScalarFunction(ScalarFunction {
                     func: self_func,
                     args: self_args,
+                    spans: _self_spans,
                 }),
                 Expr::ScalarFunction(ScalarFunction {
                     func: other_func,
                     args: other_args,
+                    spans: _other_spans,
                 }),
             ) => {
                 self_func.name() == other_func.name()
@@ -2149,7 +2176,11 @@ impl HashNode for Expr {
             }) => {
                 data_type.hash(state);
             }
-            Expr::ScalarFunction(ScalarFunction { func, args: _args }) => {
+            Expr::ScalarFunction(ScalarFunction {
+                func,
+                args: _args,
+                spans: _spans,
+            }) => {
                 func.hash(state);
             }
             Expr::AggregateFunction(AggregateFunction {
@@ -2435,16 +2466,18 @@ impl Display for SchemaDisplay<'_> {
             Expr::Unnest(Unnest { expr }) => {
                 write!(f, "UNNEST({})", SchemaDisplay(expr))
             }
-            Expr::ScalarFunction(ScalarFunction { func, args }) => {
-                match func.schema_name(args) {
-                    Ok(name) => {
-                        write!(f, "{name}")
-                    }
-                    Err(e) => {
-                        write!(f, "got error from schema_name {}", e)
-                    }
+            Expr::ScalarFunction(ScalarFunction {
+                func,
+                args,
+                spans: _spans,
+            }) => match func.schema_name(args) {
+                Ok(name) => {
+                    write!(f, "{name}")
                 }
-            }
+                Err(e) => {
+                    write!(f, "got error from schema_name {}", e)
+                }
+            },
             Expr::ScalarSubquery(Subquery { subquery, .. }) => {
                 write!(f, "{}", subquery.schema().field(0).name())
             }
