@@ -381,7 +381,11 @@ pub fn serialize_expr(
                 "Proto serialization error: Scalar Variable not supported".to_string(),
             ))
         }
-        Expr::ScalarFunction(ScalarFunction { func, args }) => {
+        Expr::ScalarFunction(ScalarFunction {
+            func,
+            args,
+            spans: _spans,
+        }) => {
             let mut buf = Vec::new();
             let _ = codec.try_encode_udf(func, &mut buf);
             protobuf::LogicalExprNode {

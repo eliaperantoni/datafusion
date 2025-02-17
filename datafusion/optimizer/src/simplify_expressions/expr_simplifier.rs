@@ -1409,17 +1409,20 @@ impl<S: SimplifyInfo> TreeNodeRewriter for Simplifier<'_, S> {
                 // Do a first pass at simplification
                 out_expr.rewrite(self)?
             }
-            Expr::ScalarFunction(ScalarFunction { func: udf, args }) => {
-                match udf.simplify(args, info)? {
-                    ExprSimplifyResult::Original(args) => {
-                        Transformed::no(Expr::ScalarFunction(ScalarFunction {
-                            func: udf,
-                            args,
-                        }))
-                    }
-                    ExprSimplifyResult::Simplified(expr) => Transformed::yes(expr),
+            Expr::ScalarFunction(ScalarFunction {
+                func: udf,
+                args,
+                spans: _spans,
+            }) => match udf.simplify(args, info)? {
+                ExprSimplifyResult::Original(args) => {
+                    Transformed::no(Expr::ScalarFunction(ScalarFunction {
+                        func: udf,
+                        args,
+                        spans: _spans,
+                    }))
                 }
-            }
+                ExprSimplifyResult::Simplified(expr) => Transformed::yes(expr),
+            },
 
             Expr::AggregateFunction(datafusion_expr::expr::AggregateFunction {
                 ref func,
