@@ -914,7 +914,7 @@ impl<S: ContextProvider> SqlToRel<'_, S> {
             .ok_or_else(|| {
                 internal_datafusion_err!("Unable to find expected '{fun_name}' function")
             })?;
-            
+
         Ok(Expr::ScalarFunction(ScalarFunction::new_udf(fun, args)))
     }
 

@@ -218,9 +218,11 @@ impl ScalarUDFImpl for LogFunc {
                     &info.get_data_type(&base)?,
                 )?)))
             }
-            Expr::ScalarFunction(ScalarFunction { func, mut args, spans: _spans })
-                if is_pow(&func) && args.len() == 2 && base == args[0] =>
-            {
+            Expr::ScalarFunction(ScalarFunction {
+                func,
+                mut args,
+                spans: _spans,
+            }) if is_pow(&func) && args.len() == 2 && base == args[0] => {
                 let b = args.pop().unwrap(); // length checked above
                 Ok(ExprSimplifyResult::Simplified(b))
             }

@@ -630,11 +630,11 @@ impl CSEController for ExprCSEController<'_> {
             // In case of `ScalarFunction`s we don't know which children are surely
             // executed so start visiting all children conditionally and stop the
             // recursion with `TreeNodeRecursion::Jump`.
-            Expr::ScalarFunction(ScalarFunction { func, args, spans: _spans })
-                if func.short_circuits() =>
-            {
-                Some((vec![], args.iter().collect()))
-            }
+            Expr::ScalarFunction(ScalarFunction {
+                func,
+                args,
+                spans: _spans,
+            }) if func.short_circuits() => Some((vec![], args.iter().collect())),
 
             // In case of `And` and `Or` the first child is surely executed, but we
             // account subexpressions as conditional in the second.

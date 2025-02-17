@@ -451,10 +451,10 @@ impl ExprSchemable for Expr {
                 let (return_type, nullable) = func
                     .return_type_from_args(args)
                     .map_err(|err| {
-                        if let Some(diag) = dbg!(err.diagnostic()) {
+                        if let Some(diag) = err.diagnostic() {
                             let mut diag = diag.clone();
                             diag.span = span;
-                            dbg!(err.with_diagnostic(diag))
+                            err.with_diagnostic(diag)
                         } else {
                             err
                         }
